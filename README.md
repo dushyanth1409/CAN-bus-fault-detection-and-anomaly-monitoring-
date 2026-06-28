@@ -155,12 +155,63 @@ run.py        CLI: generate clean + faulted + labels
 detect.py     CLI: fit on clean, predict on faulted, score
 ```
 
-## Next step (Phase 3)
+## Phase 3 — diagnosis layer
 
-Two directions, both short:
-- **Diagnosis layer** — turn a `Detection` into the plain-language output you
-  designed ("Engine ECU communication unstable — likely partial failure —
-  severity medium"), by mapping detector + reason + duration to a message.
-- **Sweep harness** — vary fault magnitude × type × bus-noise and plot
+Turns each `Detection` into a plain-language fault report. This is a
+deterministic rules engine, not more ML -- the same idea a real ECU uses when a
+detected condition maps to a Diagnostic Trouble Code (DTC) with a human
+description. It consumes **only** detector output, never the labels: at runtime
+there is no ground truth, only symptoms.
+
+```bash
+python -m can_bus_sim.detect --out-dir out            # diagnosis + scorecard
+python -m can_bus_sim.detect --out-dir out --no-eval  # runtime mode: diagnosis only
+```
+
+Output on the default campaign:
+
+```
+[HIGH]   Engine stopped communicating            (U-COMM-LOSS)
+[HIGH]   Brake communication unstable            (U-COMM-DEGRADED)
+[HIGH]   abnormal traffic from Steering          (U-BUS-FLOOD)
+[MEDIUM] BMS reporting an implausible pack_voltage (P-SIG-RANGE)
+```
+
+Each diagnosis carries severity, a DTC-style code, the likely cause, the time
+window, and an `evidence` field naming the detector and reason that produced it
+(traceability). Written to `diagnoses.json`.
+
+Two design points worth defending:
+- **Severity is a transparent rule**, not a magic score: it combines the fault
+  class (loss of comms and bus flooding are serious; a babbling node degrades
+  the *whole* bus regardless of source) with ECU criticality (brakes/steering
+  safety-critical, HV battery close behind) and duration. See `_severity` in
+  `diagnosis.py` -- every branch is readable.
+- **DTC codes follow the real convention** (U = network/communication,
+  P = powertrain/signal) but are project-internal symbols. Standard OEM codes
+  are vehicle-specific, so claiming to emit them would be wrong.
+
+## Module map (Phase 1-3)
+
+```
+model.py      Signal / Message / Frame / Vehicle, encode-decode
+config.py     the 4-ECU vehicle + default fault campaign
+generator.py  virtual-clock clean traffic
+faults.py     fault events + campaign application (= ground truth)
+traceio.py    trace/label read + write (one owner of the schema)
+detectors.py  TimingDetector, ValueDetector, Detection, merge
+evaluate.py   overlap matching -> precision / recall / latency (uses labels)
+diagnosis.py  detections -> plain-language faults + severity (no labels)
+run.py        CLI: generate clean + faulted + labels
+detect.py     CLI: detect -> diagnose -> (score)
+```
+
+## Next step (Phase 4)
+
+- **Real-time dashboard** -- stream the faulted trace through the detectors and
+  render live diagnoses (this is where the `⚠️` styling and a severity colour
+  scale belong; `diagnoses.json` is already the data contract for it).
+- **Sweep harness** -- vary fault magnitude x type x bus-noise and plot
   recall/precision/latency, so the system has a characterised operating range
-  instead of a single pass/fail.
+  rather than a single pass. The value detector's measured floor (catches +4 V,
+  misses +2 V) is the first point on that curve.
