@@ -93,12 +93,74 @@ on per-ID inter-arrival **spread and deadline gaps**, not the mean.
 - No bus arbitration / error-frame modelling; this is an application-layer
   trace, not a bit-level CAN controller simulation.
 
-## Next step (Phase 2 seed)
+## Phase 2 — detection + evaluation
 
-A single timing detector: per ID, learn the inter-arrival distribution from
-`clean_trace.csv`, then on `faulted_trace.csv` flag frames whose gap or local
-jitter exceeds a threshold. Score detections against `labels.json` for
-precision, recall, and detection latency. That evaluation table is the spine
-everything else hangs off — each new detector is one more row.
-# CAN-bus-fault-detection-and-anomaly-monitoring-
-# CAN-bus-fault-detection-and-anomaly-monitoring-
+Two interpretable detectors, each learning "normal" from `clean_trace.csv`:
+
+| Detector        | Looks at        | Catches                |
+|-----------------|-----------------|------------------------|
+| `TimingDetector`| when frames arrive | silence, delay, burst |
+| `ValueDetector` | what frames contain | out-of-range signals  |
+
+The timing detector is a per-ID **watchdog** (a deadline breach fires at
+`last_seen + gap_max`, so silence is caught ~one cycle late, not retroactively)
+plus a per-ID per-window **count band** (collapse = silence, explosion = burst).
+The value detector learns a plausibility range per `(ID, signal)`.
+
+Run it:
+
+```bash
+python -m can_bus_sim.detect --clean out/clean_trace.csv \
+    --faulted out/faulted_trace.csv --labels out/labels.json --out-dir out
+```
+
+Writes `report.txt` and `detections.json`. On the default 60 s campaign:
+
+```
+ID     name      type     window       detected  by      latency
+0x0C0  Engine    silence  18.0-24.0s   YES       timing  0.014s
+0x080  Brake     delay    30.0-38.0s   YES       timing  0.016s
+0x200  BMS       value    40.8-46.8s   YES       value   0.054s
+0x100  Steering  burst    51.0-53.0s   YES       timing  0.250s
+
+recall 100%, precision 100%, 0 false positives on the clean trace
+```
+
+Each fault is caught by the *right* detector — the argument for layering. The
+event-triggered TurnSignal (0x350) produces **zero** false positives: the
+detector learns its irregular timing from clean data rather than assuming a
+fixed cycle.
+
+### Don't be fooled by 100%
+
+The injected faults sit well above threshold, so high scores are expected. The
+value detector's measured floor on `pack_voltage`: it catches a **+4 V** drift
+but misses **+2 V**, because it can't resolve a drift smaller than the signal's
+own clean range margin. The real result is the curve of precision/recall as you
+sweep fault magnitude and add bus noise — that sweep is the next artifact, and
+it's where a rate-of-change detector would earn its place alongside the range
+check.
+
+## Module map (Phase 1 + 2)
+
+```
+model.py      Signal / Message / Frame / Vehicle, encode-decode
+config.py     the 4-ECU vehicle + default fault campaign
+generator.py  virtual-clock clean traffic
+faults.py     fault events + campaign application (= ground truth)
+traceio.py    trace/label read + write (one owner of the schema)
+detectors.py  TimingDetector, ValueDetector, Detection, merge
+evaluate.py   overlap matching -> precision / recall / latency
+run.py        CLI: generate clean + faulted + labels
+detect.py     CLI: fit on clean, predict on faulted, score
+```
+
+## Next step (Phase 3)
+
+Two directions, both short:
+- **Diagnosis layer** — turn a `Detection` into the plain-language output you
+  designed ("Engine ECU communication unstable — likely partial failure —
+  severity medium"), by mapping detector + reason + duration to a message.
+- **Sweep harness** — vary fault magnitude × type × bus-noise and plot
+  recall/precision/latency, so the system has a characterised operating range
+  instead of a single pass/fail.

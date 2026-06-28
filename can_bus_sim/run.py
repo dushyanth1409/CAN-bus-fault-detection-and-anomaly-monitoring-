@@ -18,13 +18,7 @@ from .faults import FaultEvent
 from .generator import generate
 from .faults import apply_campaign
 from .model import Frame, Vehicle
-
-
-def write_trace(frames: List[Frame], path: str) -> None:
-    with open(path, "w") as fh:
-        fh.write("timestamp,can_id,name,dlc,data_hex\n")
-        for f in frames:
-            fh.write(f.to_csv_row() + "\n")
+from .traceio import write_trace
 
 
 def write_labels(campaign: List[FaultEvent], vehicle: Vehicle, path: str) -> None:
