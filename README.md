@@ -1,3 +1,5 @@
+[![CI](https://github.com/dushyanth1409/CAN-bus-fault-detection-and-anomaly-monitoring-/actions/workflows/ci.yml/badge.svg)](https://github.com/dushyanth1409/CAN-bus-fault-detection-and-anomaly-monitoring-/actions/workflows/ci.yml)
+
 # CAN data generator + fault injection harness (Phase 1)
 
 A dependency-free (pure stdlib Python) harness that generates realistic CAN bus
